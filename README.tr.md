@@ -170,7 +170,8 @@ Kapat'ı indirip kurar, Couchy'yi ana ekran yapar, [`scripts/packages.ps1`](scri
 kapatır, log seviyesi ve animasyon ayarlarını yapar, Gerçek Kapat'ı eşleştirir. Elle yapılacak birkaç adımı
 (HbbTV, Couchy'nin ilk kurulumu, TV Bro ayarları) en sonda yazar. Betiklerin çıktısı İngilizce.
 
-- `-KeepVoiceSearch`: kumandada mikrofon varsa Google uygulamasını kapatmaz.
+- `-KeepVoiceSearch`: kumandada mikrofon varsa Google uygulamasını kapatmaz. Bizim TV'de ~155 MB RAM tutuyordu, o yüzden
+  sadece sesli arama gerçekten kullanılacaksa ekleyin.
 - `-KeepCast`: telefondan yansıtma kullanılıyorsa Chromecast'i kapatmaz.
 - `-SkipGercekKapat`: Gerçek Kapat'ı kurmaz.
 - TV'de Google hesabı varsa Play Store'a dokunmaz.

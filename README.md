@@ -174,7 +174,8 @@ Couchy, TV Bro and Gerçek Kapat, makes Couchy the home screen, disables the pac
 [`scripts/packages.ps1`](scripts/packages.ps1), sets the log level and animations, and pairs Gerçek Kapat. It prints
 the few manual steps at the end (HbbTV, Couchy's first run, TV Bro settings).
 
-- `-KeepVoiceSearch`: keeps the Google app, for remotes with a microphone.
+- `-KeepVoiceSearch`: keeps the Google app, for remotes with a microphone. It took ~155 MB of RAM on our TV, so only
+  use it if someone really uses voice search.
 - `-KeepCast`: keeps Chromecast, if anyone casts from a phone.
 - `-SkipGercekKapat`: doesn't install Gerçek Kapat.
 - If the TV has a Google account, Play Store is left alone.
