@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.ifkurt.gercekkapat"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <!-- targetSdk 25: no notification channel needed, BOOT_COMPLETED may start a plain service. -->
+    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="25" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <!-- No launcher icon on purpose: the family never sees it. Controlled over ADB only. -->
+    <application
+        android:label="Gerçek Kapat"
+        android:allowBackup="false">
+
+        <!-- Exported only to holders of DUMP (adb shell / system), so other apps cannot drive it. -->
+        <service
+            android:name=".WatchService"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

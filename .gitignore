@@ -1,0 +1,10 @@
+# build output
+gercek-kapat/build/
+
+# signing keys and passwords never go into the repo
+*.jks
+*.keystore
+*sifre*.txt
+
+# backups written by scripts/apply.ps1
+yedek-*.txt
