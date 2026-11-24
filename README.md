@@ -1,119 +1,121 @@
-# Beko Android TV hızlandırma
+# Beko Android TV speed-up
 
-Yavaşlayan bir Beko Android TV'yi root'suz, sadece ADB ile nasıl hızlandırdığımızın notları. Bir de işin en inatçı
-parçası için küçük bir uygulama: **Gerçek Kapat**. Kumandanın güç tuşuna tek basıldığında TV'yi uyutmak yerine,
-gerektiğinde gerçekten kapatıyor.
+**English** | [Türkçe](README.tr.md)
 
-Hepsi geri alınabilir. Hiçbir sistem uygulaması silinmedi, sadece kapatıldı.
+Notes on how we sped up a sluggish Beko Android TV without root, using only ADB. Plus a small app for the most
+stubborn part: **Gerçek Kapat** ("really power off"). When the remote's power button is pressed once, it powers the TV
+off for real when needed, instead of letting it sleep.
 
-*English summary at the bottom.*
+Everything is reversible. No system app was uninstalled, only disabled.
 
-## Televizyon
+## The TV
 
 | | |
 |---|---|
 | Model | Beko Android TV (`ro.product.name=Beko_EU`, `ro.product.device=shinagawa`) |
-| Kartı üreten | Skyworth (`ro.product.manufacturer=skyworth`) |
-| Çip | MStar/MediaTek `m5621` |
-| RAM | ~1 GB (909 MB görünüyor), Android onu "düşük RAM cihazı" sayıyor (`ro.config.low_ram=true`) |
-| Android | Android TV 9 (API 28), yazılım Aralık 2021 (`PT07.211208.001`) |
+| Board made by | Skyworth (`ro.product.manufacturer=skyworth`) |
+| SoC | MStar/MediaTek `m5621` |
+| RAM | ~1 GB (909 MB visible); Android treats it as a low-RAM device (`ro.config.low_ram=true`) |
+| Android | Android TV 9 (API 28), firmware from December 2021 (`PT07.211208.001`) |
 
-## Sorun neydi
+## What was wrong
 
-Belirti: menüler ağır, kumandanın tuşları geç ya da yarım algılanıyor, TV günler geçtikçe daha da yavaşlıyor.
+Symptoms: sluggish menus, remote presses registered late or only partly, and the TV got slower the longer it ran.
 
-TV 2,5 gündür hiç yeniden başlamamışken ölçtüklerimiz:
+Measured after 2.5 days without a reboot:
 
-- **Bellek bitmişti.** Kullanılabilir RAM 174 MB. 300 MB'lık swap (RAM içinde sıkıştırılmış alan, zram) tamamen
-  doluydu, 2 MB kalmıştı. Çekirdeğin bellek temizleyicisi `kswapd0` durmadan çalışıyordu (o an %19 CPU, toplam 26
-  dakika). Arayüz bellek bekledikçe kumanda tuşları gecikiyor.
-- **Load average 108 yanıltıcıydı.** Bekleme (D) durumundaki ~109 görevin hepsi MStar'ın sürücü thread'leri
-  (`VMon_Task`, `DMX_Filt_Task`, `VDEC_*` …). Linux onları load average'a sayıyor ama CPU harcamıyorlar; CPU'nun
-  %70'i boştaydı. Bunlar çekirdek seviyesinde, dokunulmadı.
-- **RAM'i yiyenler:** Google uygulaması (`katniss`, sesli arama) iki süreçte 155 MB, HbbTV tarayıcısı ~63 MB,
-  Play Store'un arka plan süreci 33 MB, Skyworth'un fabrika uygulaması 25 MB, Chromecast 21 MB, ayrıca Google'ın ana
-  ekranı, öneri servisleri ve mağaza demo uygulamaları.
-- **Log seli:** Dakikada ~12.000 log satırı yazılıyordu, en çok canlı TV uygulaması `tvcenter`. `logd` ile
-  üreticinin `k2logcat` servisi birlikte 35 dakika CPU harcamıştı.
-- **Güç tuşu TV'yi kapatmıyor, uyutuyor.** Kısa basış TV'yi RAM'de uyutuyor (STR, Suspend to RAM;
-  `ro.vendor.mstar.str.enable=user_mode`). Gerçek kapatma için tuşa 5 saniye basılı tutup "Tamam" demek gerekiyor;
-  evde kimse öyle kapatmıyor. TV haftalarca yeniden başlamıyor, bellek sorunları birikiyor.
+- **Memory was exhausted.** 174 MB of available RAM. The 300 MB swap (compressed RAM, zram) was full, with 2 MB
+  left. The kernel's memory reclaimer `kswapd0` never stopped (19% CPU at that moment, 26 minutes in total). The UI
+  waits for memory, so key presses lag.
+- **The load average of 108 was misleading.** All ~109 tasks in uninterruptible (D) state were MStar driver threads
+  (`VMon_Task`, `DMX_Filt_Task`, `VDEC_*` …). Linux counts them in the load average, but they use no CPU; the CPU was
+  70% idle. They live in the kernel and were left alone.
+- **Memory hogs:** the Google app (`katniss`, voice search) at 155 MB across two processes, the HbbTV browser at
+  ~63 MB, the Play Store background process at 33 MB, Skyworth's factory app at 25 MB, Chromecast at 21 MB, plus
+  Google's home screen, recommendation services and store demo apps.
+- **A flood of logs:** ~12,000 log lines per minute, most of them from the live TV app `tvcenter`. `logd` and the
+  vendor's `k2logcat` service had used 35 minutes of CPU between them.
+- **The power button suspends instead of powering off.** A short press suspends to RAM (STR,
+  `ro.vendor.mstar.str.enable=user_mode`). A real shutdown needs a 5-second press and "OK", which nobody at home does.
+  The TV went weeks without a reboot and memory problems piled up.
 
-## Ne yaptık, neden
+## What we did, and why
 
 ### 1. ADB
 
-Ayarlar → Cihaz Tercihleri → Hakkında → Derleme'ye 7 kez bas, Geliştirici seçenekleri'nden USB hata ayıklamayı aç.
-Bu TV'de ağ üzerinden ADB'yi ayrıca açan bir anahtar yok ama 5555 portu kendiliğinden açılıyor
-(`service.adb.tcp.port=5555`), kablo gerekmedi. İlk bağlantıda TV'de izin penceresi çıkar.
+On the TV: Settings → Device Preferences → About → press Build 7 times, then turn on USB debugging in Developer
+options. This TV has no separate network debugging switch, but port 5555 opens by itself
+(`service.adb.tcp.port=5555`), so no cable was needed. The TV asks for permission on the first connection.
 
 ```
 adb connect TV_IP:5555
 ```
 
-### 2. Paketleri kapatmak
+### 2. Disabling packages
 
-`pm disable-user --user 0 <paket>` ile. Uygulama yerinde kalıyor ama hiçbir parçası çalışmıyor;
-`pm enable <paket>` ile geri geliyor. Silmekle (`pm uninstall --user 0`) arasında hız farkı yok: sistem uygulamalarının
-dosyası salt okunur bölümde durduğu için silmek yer de açmıyor.
+With `pm disable-user --user 0 <package>`. The app stays installed but none of its parts run, and
+`pm enable <package>` brings it back. Uninstalling (`pm uninstall --user 0`) would be no faster, and it frees no space
+either: system apps live on the read-only partition.
 
-| Paket | Ne | Neden kapatıldı |
+| Package | What | Why it was disabled |
 |---|---|---|
-| `com.google.android.tvlauncher` | Google ana ekranı | Reklam ve öneri satırları, ağır. Yerine Couchy. |
-| `com.google.android.tvrecommendations` | Android TV Core Services | Ana ekran önerileri, yeni ana ekranda işe yaramıyor. |
-| `com.mediatek.wwtv.tvrecommendation` | MediaTek canlı TV öneri satırı | ~9 MB, sadece ana ekran satırı için. Kanallar etkilenmiyor. |
-| `com.google.android.katniss` | Google uygulaması (sesli arama, Asistan) | ~155 MB, sürekli bellekte. Bu kumandada mikrofon tuşu yok. |
-| `com.google.android.speech.pumpkin` | Çevrimdışı ses tanıma | katniss ile birlikte. |
-| `com.google.android.apps.mediashell` | Chromecast | Kullanılmıyor, ~21 MB. |
-| `com.google.android.tv.remote.service` | Telefondan kumanda servisi | Kullanılmıyor, ~12 MB. |
-| `com.android.vending` | Play Store | TV'de Google hesabı yok, hiçbir şey kuramıyor; arka plan süreci 33 MB. |
-| `com.google.android.youtube.tvmusic` | YouTube Music | Kullanılmıyor. |
-| `com.google.android.backdrop` | Ekran koruyucu | İnternetten fotoğraf çekiyor. |
-| `com.google.android.apps.nbu.smartconnect.tv` | Data Saver | VPN tabanlı veri tasarrufu, kullanılmıyor. |
-| `fusion.android.tv.demo`, `com.smartdevice.common.demonow` | Mağaza demo uygulamaları | Arka planda çalışıyordu. |
-| `com.Smartdevice.emanual` | E-kılavuz | Gereksiz kutucuk. |
-| `com.airoha.ble.ota` | RC Upgrade | Bluetooth kumandanın yazılım güncelleyicisi; bu kumanda kızılötesi. |
-| `com.mstar.netflixobserver` | MStar Netflix yardımcısı | Netflix kurulu değil, ~4 MB. |
-| `com.mstar.android.tv.disclaimercustomization` | MStar yasal uyarı aracı | Gereksiz kutucuk. |
+| `com.google.android.tvlauncher` | Google home screen | Ad and recommendation rows, heavy. Replaced by Couchy. |
+| `com.google.android.tvrecommendations` | Android TV Core Services | Home screen recommendations, useless with the new home screen. |
+| `com.mediatek.wwtv.tvrecommendation` | MediaTek live TV recommendation row | ~9 MB, only feeds a home screen row. Channels still work. |
+| `com.google.android.katniss` | Google app (voice search, Assistant) | ~155 MB, always in memory. Not used here. |
+| `com.google.android.speech.pumpkin` | Offline speech recognition | Goes with katniss. |
+| `com.google.android.apps.mediashell` | Chromecast | Not used, ~21 MB. |
+| `com.google.android.tv.remote.service` | Phone-as-remote service | Not used, ~12 MB. |
+| `com.android.vending` | Play Store | No Google account on the TV, so it can't install anything; its background process used 33 MB. |
+| `com.google.android.youtube.tvmusic` | YouTube Music | Not used. |
+| `com.google.android.backdrop` | Screensaver | Downloads photos from the internet. |
+| `com.google.android.apps.nbu.smartconnect.tv` | Data Saver | VPN-based data saving, not used. |
+| `fusion.android.tv.demo`, `com.smartdevice.common.demonow` | Store demo apps | Were running in the background. |
+| `com.Smartdevice.emanual` | E-manual | Unneeded tile. |
+| `com.airoha.ble.ota` | RC Upgrade | Firmware updater for Bluetooth remotes. |
+| `com.mstar.netflixobserver` | MStar Netflix helper | Netflix isn't installed, ~4 MB. |
+| `com.mstar.android.tv.disclaimercustomization` | MStar disclaimer tool | Unneeded tile. |
 
-Dokunulmayanlar: Google Play Hizmetleri (YouTube buna bağlı), Gboard, canlı TV servisleri (`tvcenter`, `dtv_svc`,
-`mtktvapi`, `tvinput`), kumandanın YouTube tuşunu yöneten `com.mediatek.hotkey.dispatcher`, kurulum sihirbazları.
+Left alone: Google Play services (YouTube depends on it), Gboard, the live TV services (`tvcenter`, `dtv_svc`,
+`mtktvapi`, `tvinput`), `com.mediatek.hotkey.dispatcher` (handles the remote's YouTube button), setup wizards.
 
-### 3. Ana ekran: Couchy Launcher
+### 3. Home screen: Couchy Launcher
 
-[Couchy Launcher](https://f-droid.org/packages/com.conreo.couchytv/) (F-Droid, GPL-3): reklam yok, varsayılan
-ayarlarda ağ isteği yok, arka plan servisi yok.
+[Couchy Launcher](https://f-droid.org/packages/com.conreo.couchytv/) (F-Droid, GPL-3): no ads, no network requests
+with default settings, no background services.
 
-Bu TV'de `cmd package set-home-activity` "Success" dönse de Home tuşu Google'ın ana ekranına sabit kalıyor. Tek
-çözüm `tvlauncher`'ı kapatmak; o zaman Home tuşunun açabileceği tek ana ekran Couchy kalıyor. Paket listesinde
-görünen eski Leanback ana ekranı bu TV'de ana ekran olarak çalışmıyor (HOME aktivitesi yok).
+On this TV `cmd package set-home-activity` returns "Success", yet the Home key stays bound to Google's home screen.
+The only fix is disabling `tvlauncher`; then Couchy is the only home screen the Home key can open. The old Leanback
+launcher in the package list doesn't work as a home screen here (it has no HOME activity).
 
-### 4. Tarayıcı: TV Bro
+### 4. Browser: TV Bro
 
-[TV Bro](https://github.com/truefedex/tv-bro) (açık kaynak, kumanda için yapılmış, reklam engelleyicili).
-TV'de Google hesabı olmadığı için Play Store yerine geliştiricinin GitHub sürümü (`generic-geckoExcluded`):
-WebView motorunu kullanıyor, geliştirici zayıf cihazlara bunu öneriyor. Ayarlardan reklam engelleyici açık,
-otomatik güncelleme denetimi kapalı; evdekilerin karşısına "güncelle/kur" penceresi çıkmıyor.
+[TV Bro](https://github.com/truefedex/tv-bro): open source, built for TV remotes, with an ad blocker. With no Google
+account on the TV, we skipped Play Store and installed the developer's GitHub build (`generic-geckoExcluded`). It uses
+the WebView engine, which the developer recommends for weak devices. Ad blocking is on and the automatic update check
+is off, so nobody at home gets an "update/install" prompt.
 
-### 5. HbbTV kapalı
+### 5. HbbTV off
 
-Canlı TV açıkken MENU → Gelişmiş Seçenekler → HbbTV Ayarları → HbbTV Desteği: Kapalı.
+With live TV on: MENU → Advanced Options → HbbTV Settings → HbbTV Support: Off. Our TV's menu is in Turkish
+(Gelişmiş Seçenekler → HbbTV Ayarları → HbbTV Desteği); the English names are translations and may read slightly
+differently on your TV.
 
-HbbTV, kanalların yayınla birlikte gönderdiği, kırmızı tuşla açılan etkileşimli uygulamalar. TV bunun için arka
-planda gömülü bir web tarayıcısı çalıştırıyor ve HbbTV'li her kanalda o kanalın uygulamasını bellekte tutuyor.
-Kapatınca normal yayın etkilenmiyor. Tarayıcının kendisi (`teatro_tv_browser`, ~33 MB) yine de açılışta MediaTek'in
-`app_man` servisi tarafından yükleniyor; root olmadan durdurulamıyor.
+HbbTV is the interactive apps that channels broadcast alongside the program, opened with the red button. The TV runs
+an embedded web browser in the background for them and keeps each HbbTV channel's app in memory. Turning it off
+doesn't affect normal viewing. The browser shell itself (`teatro_tv_browser`, ~33 MB) is still loaded at boot by
+MediaTek's `app_man` service, and it can't be stopped without root.
 
-### 6. Log seviyesi
+### 6. Log level
 
 ```
 adb shell setprop persist.log.tag W
 ```
 
-Android'in log kütüphanesi bu değere bakıp uyarı (W) seviyesinin altındaki satırları hiç yazmadan atıyor.
-Uygulamalar etkilenmiyor, ayar kalıcı. **Dakikada ~12.000 satırdan 12 satıra indi.**
+Android's log library checks this value and drops every line below warning level before it is written. Apps aren't
+affected and the setting survives reboots. **From ~12,000 lines per minute down to 12.**
 
-### 7. Animasyonlar yarı sürede
+### 7. Animations at half duration
 
 ```
 adb shell settings put global window_animation_scale 0.5
@@ -123,104 +125,82 @@ adb shell settings put global animator_duration_scale 0.5
 
 ### 8. Gerçek Kapat
 
-Güç tuşuna tek basışın davranışı Android'in sistem yapılandırmasında; root olmadan değişmiyor. Bunun yerine küçük
-bir uygulama ekran kapandığı anı yakalıyor ve gerekiyorsa TV'yi gerçekten kapatıyor:
+What a single press of the power button does is set in Android's system configuration and can't be changed without
+root. Instead, a small app catches the moment the screen turns off and, when needed, powers the TV off for real:
 
-- Saat **23:00–06:00** arasıysa ve TV en az **3 gündür** gerçekten kapanmadıysa → gerçek kapatma.
-- TV **5 günden** uzun süredir hiç kapanmadıysa → saatten bağımsız gerçek kapatma.
-- Diğer durumlarda → normal uyku, anında açılış.
+- Between **23:00 and 06:00**, if the TV hasn't really been off for at least **3 days** → real power-off.
+- If the TV hasn't been off for more than **5 days** → real power-off at any hour.
+- Otherwise → normal sleep, instant wake-up.
 
-Kapatmayı TV'nin kendi ADB'sine içeriden (`127.0.0.1:5555`) bağlanıp `reboot -p` çalıştırarak yapıyor. Uygulamanın
-kendi ADB anahtarı bir kez TV'de onaylanıyor. Simgesi yok, sadece ADB ile yönetiliyor. Soğuk açılış 40–45 saniye
-sürdüğü için her basışta değil, aralıklarla kapatıyor.
+It powers off by connecting to the TV's own ADB from inside (`127.0.0.1:5555`) and running `reboot -p`. The app's own
+ADB key is approved on the TV once. It has no icon and is managed over ADB only. A cold boot takes 40–45 seconds, which
+is why it doesn't power off on every press.
 
-Kaynak kodu, kurulum ve ayar komutları: [`gercek-kapat/`](gercek-kapat/). APK: [Releases](https://github.com/if-kurt/beko-android-tv-speedup/releases).
+Source, install and settings commands: [`gercek-kapat/`](gercek-kapat/). APK:
+[Releases](https://github.com/if-kurt/beko-android-tv-speedup/releases).
 
-### Denenip işe yaramayanlar
+### Tried, didn't work
 
-- **`svc power shutdown`**: komut hata vermeden yutuluyor, TV kapanmıyor. `reboot -p` çalışıyor.
-- **`setprop persist.adb.tcp.port 5555`**: ADB kabuğu bu değeri yazamıyor. Gerek de kalmadı, port açılışta zaten açılıyor.
-- **Skyworth'un fabrika uygulaması (`com.coocaa.factory`, ~25 MB)**: kapatılıyor ama TV açılışta onu yeniden
-  etkinleştiriyor. Bırakıldı.
-- **Eski Leanback ana ekranı**: bu TV'de ana ekran olarak açılmıyor.
+- **`svc power shutdown`**: swallowed without an error; the TV stays on. `reboot -p` works.
+- **`setprop persist.adb.tcp.port 5555`**: the ADB shell can't write this property. Not needed anyway, the port opens
+  at boot.
+- **Skyworth's factory app (`com.coocaa.factory`, ~25 MB)**: it can be disabled, but the TV enables it again at boot.
+  Left alone.
+- **The old Leanback launcher**: doesn't open as a home screen on this TV.
 
-## Sonuç
+## Result
 
-| | Önce (2,5 gün açık) | Sonra |
+| | Before (up 2.5 days) | After |
 |---|---|---|
-| Kullanılabilir RAM | 174 MB | ~300 MB |
-| Boş swap | 2 MB | 106 MB (aynı oturumda, yeniden başlatmadan) |
-| Log | ~12.000 satır/dakika | 12 satır/dakika |
-| Ana ekran | Google, reklam ve film mağazası satırları | Couchy |
-| Güç tuşu | hep uyku | gece ve 3 günde bir gerçek kapatma |
+| Available RAM | 174 MB | ~300 MB |
+| Free swap | 2 MB | 106 MB (same session, no reboot) |
+| Logs | ~12,000 lines/minute | 12 lines/minute |
+| Home screen | Google, with ad and movie store rows | Couchy |
+| Power button | always sleep | real power-off every few nights |
 
-Sırada: Gboard (açılışta ~75 MB) yerine daha hafif bir TV klavyesi.
+Next: a lighter TV keyboard instead of Gboard (~75 MB at boot).
 
-## Aynı TV'de uygulamak
+## Applying it to the same TV
 
-Windows'ta, [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) (`adb`)
-PATH'teyken, TV'de USB hata ayıklama açıkken:
+On Windows, with [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) (`adb`) on
+PATH and USB debugging on:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\apply.ps1 -TvIp 192.168.1.50
 ```
 
-Betik TV'ye bağlanır ve modeli kontrol eder, mevcut durumu bir yedek dosyasına yazar, Couchy, TV Bro ve Gerçek
-Kapat'ı indirip kurar, Couchy'yi ana ekran yapar, [`scripts/packages.ps1`](scripts/packages.ps1)'deki paketleri
-kapatır, log seviyesi ve animasyon ayarlarını yapar, Gerçek Kapat'ı eşleştirir. Elle yapılacak birkaç adımı
-(HbbTV, Couchy'nin ilk kurulumu, TV Bro ayarları) en sonda yazar.
+The script connects to the TV and checks the model, writes the current state to a backup file, downloads and installs
+Couchy, TV Bro and Gerçek Kapat, makes Couchy the home screen, disables the packages in
+[`scripts/packages.ps1`](scripts/packages.ps1), sets the log level and animations, and pairs Gerçek Kapat. It prints
+the few manual steps at the end (HbbTV, Couchy's first run, TV Bro settings).
 
-- `-KeepVoiceSearch`: kumandada mikrofon varsa Google uygulamasını kapatmaz.
-- `-KeepCast`: telefondan yansıtma kullanılıyorsa Chromecast'i kapatmaz.
-- `-SkipGercekKapat`: Gerçek Kapat'ı kurmaz.
-- TV'de Google hesabı varsa Play Store'a dokunmaz.
+- `-KeepVoiceSearch`: keeps the Google app, for remotes with a microphone.
+- `-KeepCast`: keeps Chromecast, if anyone casts from a phone.
+- `-SkipGercekKapat`: doesn't install Gerçek Kapat.
+- If the TV has a Google account, Play Store is left alone.
 
-Geri almak için:
+To undo:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\restore.ps1 -TvIp 192.168.1.50
 ```
 
-Betik bu modele göre yazıldı. Farklı bir modelde paket listesini kendi TV'ne göre kontrol et.
+The scripts were written for this model. On another model, check the package list against your TV first.
 
-## Güvenlik
+## Security
 
-- Gerçek Kapat için ağ üzerinden ADB açık kalıyor. Ağdaki bir cihaz TV'ye bağlanmak isterse TV'de izin penceresi
-  çıkar; tanımadığın pencereye izin verme. Modemde 5555 portunu dışarı açma.
-- Gerçek Kapat'ın ADB anahtarı uygulamanın özel klasöründe duruyor ve sadece `reboot -p` için kullanılıyor.
-- Film sitelerinde açılır pencereler ve sahte "indir/oynat" düğmeleri olur. TV Bro'nun reklam engelleyicisi açık
-  kalsın, sitelerin indirttiği hiçbir dosya kurulmasın.
+- Gerçek Kapat needs network ADB to stay on. If a device on the network tries to connect, the TV shows a permission
+  prompt; don't approve one you don't recognize. Don't forward port 5555 on your router.
+- Gerçek Kapat's ADB key stays in the app's private folder and is only used for `reboot -p`.
+- Streaming sites are full of pop-ups and fake "download/play" buttons. Keep TV Bro's ad blocker on and never install
+  files that a site downloads.
 
-## Teşekkürler
+## Credits
 
-- [couch-tv](https://github.com/Seagey/couch-tv): bu işe başlatan fikir.
+- [couch-tv](https://github.com/Seagey/couch-tv): the idea that started this.
 - [Couchy Launcher](https://f-droid.org/packages/com.conreo.couchytv/), [TV Bro](https://github.com/truefedex/tv-bro).
 
-## Lisans
+## License
 
-[MIT](LICENSE). Couchy Launcher ve TV Bro kendi lisanslarıyla dağıtılıyor; bu repoda kodları yok, betik onları
-kendi kaynaklarından indiriyor.
-
----
-
-## English summary
-
-Notes on speeding up a Beko Android TV (Skyworth board, MStar/MediaTek `m5621`, ~1 GB RAM, Android TV 9) without
-root, over ADB only, and **Gerçek Kapat** ("really power off"), a tiny app that turns the remote's single power press
-into a real shutdown when the TV has been sleeping for days.
-
-- **Diagnosis:** after 2.5 days without a reboot, 174 MB available RAM and a completely full 300 MB zram swap with
-  `kswapd0` constantly busy. The load average of 108 is misleading: ~109 MStar driver kernel threads sit in D state
-  while the CPU is 70% idle. Big consumers: Google app `katniss` (155 MB), the HbbTV browser (~63 MB), Play Store
-  background (33 MB). Logging ran at ~12,000 lines per minute. The power button only suspends to RAM (STR), so the TV
-  never reboots.
-- **Fixes:** disable 17 packages (`pm disable-user`, nothing uninstalled; list in `scripts/packages.ps1`), replace the
-  Google home with Couchy Launcher (on this TV the Home key stays bound to `tvlauncher` until it is disabled), TV Bro
-  as the browser, HbbTV off in the TV menu, `setprop persist.log.tag W` (12,000 → 12 log lines per minute), animation
-  scale 0.5.
-- **Gerçek Kapat:** on screen-off it checks the time and the uptime (default: between 23:00 and 06:00 after 3 days, or
-  any time after 5 days), holds a wake lock, connects to the TV's own adbd at `127.0.0.1:5555` with its own
-  authorized key and runs `reboot -p`. `svc power shutdown` is swallowed by this firmware. Source in `gercek-kapat/`,
-  APK in Releases.
-- **Result:** ~300 MB available RAM instead of 174 MB; the TV now really powers off every few nights.
-- `scripts/apply.ps1` applies everything to the same model from Windows; `scripts/restore.ps1` undoes it.
+[MIT](LICENSE). Couchy Launcher and TV Bro have their own licenses; their code isn't in this repo, the script
+downloads them from their own sources.

@@ -23,10 +23,10 @@ final class Policy {
         }
         long hours = uptimeMs / 3600000L;
         if (hours >= anyMinHours) {
-            return "TV " + hours + " saattir hiç kapanmadı";
+            return "TV not powered off for " + hours + " h";
         }
         if (inWindow(hour, nightStart, nightEnd) && hours >= nightMinHours) {
-            return "gece saati ve TV " + hours + " saattir açık";
+            return "night time and TV up for " + hours + " h";
         }
         return null;
     }

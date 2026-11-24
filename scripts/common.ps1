@@ -1,4 +1,4 @@
-﻿# apply.ps1 ve restore.ps1'in ortak yardımcıları. $Target ("ip:5555") çağıran betikte tanımlı olmalı.
+﻿# Helpers shared by apply.ps1 and restore.ps1. The calling script must define $Target ("ip:5555").
 
 function Write-Step([string]$Text) {
     Write-Host ''
@@ -11,26 +11,26 @@ function Invoke-AdbShell([string]$Command) {
 
 function Assert-Command([string]$Name, [string]$Hint) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-        throw "$Name bulunamadı. $Hint"
+        throw "$Name not found. $Hint"
     }
 }
 
 function Connect-Tv {
-    Write-Step "TV'ye bağlanılıyor: $Target"
+    Write-Step "Connecting to the TV: $Target"
     $deadline = (Get-Date).AddSeconds(120)
     $hinted = $false
     while ($true) {
         & adb connect $Target 2>&1 | Out-Null
         $state = (& adb -s $Target get-state 2>&1 | Out-String).Trim()
         if ($state -eq 'device') {
-            Write-Host '   bağlandı'
+            Write-Host '   connected'
             return
         }
         if ((Get-Date) -gt $deadline) {
-            throw "TV'ye bağlanılamadı ($state). TV açık mı, Geliştirici seçenekleri'nde USB hata ayıklama açık mı, IP doğru mu?"
+            throw "Could not connect to the TV ($state). Is the TV on, is USB debugging on in Developer options, is the IP right?"
         }
         if (-not $hinted) {
-            Write-Host "   TV'de 'USB hata ayıklamaya izin verilsin mi?' penceresi çıkarsa 'Her zaman izin ver' ile onayla."
+            Write-Host "   If the TV asks 'Allow USB debugging?', tick 'Always allow' and confirm."
             $hinted = $true
         }
         Start-Sleep -Seconds 5

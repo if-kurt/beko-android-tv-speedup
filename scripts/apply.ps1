@@ -1,28 +1,28 @@
 ﻿<#
 .SYNOPSIS
-    Beko Android TV (Skyworth, MStar m5621, Android TV 9) hızlandırma ayarlarını ADB ile uygular.
+    Applies the speed-up settings to a Beko Android TV (Skyworth, MStar m5621, Android TV 9) over ADB.
 
 .DESCRIPTION
-    Sırasıyla:
-      1. TV'ye ağ üzerinden bağlanır ve modeli kontrol eder.
-      2. Mevcut durumu bir yedek dosyasına yazar.
-      3. Couchy Launcher, TV Bro ve Gerçek Kapat'ı indirip kurar.
-      4. Couchy'yi ana ekran yapar, packages.ps1'deki paketleri kapatır (silmez).
-      5. Log seviyesini W yapar, animasyon sürelerini yarıya indirir.
-      6. Gerçek Kapat'ı TV ile eşleştirir (TV'de izin penceresi çıkar).
-    Elle yapılacak birkaç adım en sonda yazılır. Hepsi restore.ps1 ile geri alınır.
+    In order:
+      1. Connects to the TV over the network and checks the model.
+      2. Writes the current state to a backup file.
+      3. Downloads and installs Couchy Launcher, TV Bro and Gerçek Kapat.
+      4. Makes Couchy the home screen and disables the packages in packages.ps1 (nothing is uninstalled).
+      5. Sets the log level to W and halves animation durations.
+      6. Pairs Gerçek Kapat with the TV (the TV shows a permission prompt).
+    A few manual steps are printed at the end. restore.ps1 undoes everything.
 
 .PARAMETER TvIp
-    TV'nin IP adresi (TV'de Ayarlar > Ağ ve İnternet).
+    The TV's IP address (on the TV: Settings > Network & Internet).
 
 .PARAMETER KeepVoiceSearch
-    Google uygulamasını (sesli arama) kapatma. Kumandada mikrofon tuşu varsa bunu kullan.
+    Keep the Google app (voice search). Use it if the remote has a microphone.
 
 .PARAMETER KeepCast
-    Chromecast'i kapatma. Telefondan TV'ye yansıtma kullanılıyorsa bunu kullan.
+    Keep Chromecast. Use it if anyone casts from a phone.
 
 .PARAMETER SkipGercekKapat
-    Gerçek Kapat'ı kurma.
+    Do not install Gerçek Kapat.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\scripts\apply.ps1 -TvIp 192.168.1.50
@@ -63,74 +63,74 @@ function Get-LatestFDroidApk([string]$AppId, [string]$Fallback) {
 
 function Save-File([string]$Url, [string]$Name) {
     $path = Join-Path $Work $Name
-    Write-Host "   indiriliyor: $Url"
+    Write-Host "   downloading: $Url"
     & curl.exe -fsSL --retry 2 -o $path $Url
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $path) -or (Get-Item $path).Length -lt 10000) {
-        throw "İndirilemedi: $Url"
+        throw "Download failed: $Url"
     }
     return $path
 }
 
 function Install-Apk([string]$Path) {
     $out = (& adb -s $Target install -r $Path 2>&1 | Out-String).Trim()
-    if ($out -notmatch 'Success') { throw "Kurulamadı ($Path): $out" }
-    Write-Host "   kuruldu: $(Split-Path $Path -Leaf)"
+    if ($out -notmatch 'Success') { throw "Install failed ($Path): $out" }
+    Write-Host "   installed: $(Split-Path $Path -Leaf)"
 }
 
-Assert-Command 'adb' 'Android SDK Platform-Tools kurulu ve PATH''te olmalı.'
-Assert-Command 'curl.exe' 'Windows 10 (1803) ve sonrasıyla birlikte gelir.'
+Assert-Command 'adb' 'Android SDK Platform-Tools must be installed and on PATH.'
+Assert-Command 'curl.exe' 'It ships with Windows 10 (1803) and later.'
 
 Connect-Tv
 
-Write-Step 'Model kontrolü'
+Write-Step 'Model check'
 $model = Invoke-AdbShell 'getprop ro.product.model'
 $platform = Invoke-AdbShell 'getprop ro.board.platform'
 $sdk = Invoke-AdbShell 'getprop ro.build.version.sdk'
-Write-Host "   model: $model, çip: $platform, API: $sdk"
+Write-Host "   model: $model, SoC: $platform, API: $sdk"
 if ($model -ne 'Beko Android TV' -or $platform -ne 'm5621' -or $sdk -ne '28') {
-    Write-Warning 'Bu betik yalnızca Beko Android TV (MStar m5621, Android 9) üzerinde denendi. packages.ps1 listesini kendi TV''ne göre kontrol et.'
-    if ((Read-Host 'Yine de devam edilsin mi? (e/h)') -ne 'e') { exit 1 }
+    Write-Warning 'This script was only tested on a Beko Android TV (MStar m5621, Android 9). Check packages.ps1 against your TV.'
+    if ((Read-Host 'Continue anyway? (y/n)') -ne 'y') { exit 1 }
 }
 
-Write-Step 'Yedek'
+Write-Step 'Backup'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$backupFile = Join-Path (Get-Location) ('yedek-{0}-{1}.txt' -f ($TvIp -replace '\.', '-'), $stamp)
+$backupFile = Join-Path (Get-Location) ('backup-{0}-{1}.txt' -f ($TvIp -replace '\.', '-'), $stamp)
 @(
     "# $Target  $(Get-Date -Format s)",
-    '# kapalı paketler',
+    '# disabled packages',
     (Invoke-AdbShell 'pm list packages -d'),
-    '# ana ekran',
+    '# home screen',
     (Invoke-AdbShell 'cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME'),
-    '# animasyonlar ve log seviyesi',
+    '# animation scales and log level',
     (Invoke-AdbShell 'settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale; getprop persist.log.tag')
 ) | Set-Content -Path $backupFile -Encoding UTF8
 Write-Host "   $backupFile"
 
-Write-Step 'Uygulamalar indiriliyor'
+Write-Step 'Downloading apps'
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 $couchy = Save-File (Get-LatestFDroidApk 'com.conreo.couchytv' 'https://f-droid.org/repo/com.conreo.couchytv_7.apk') 'couchy.apk'
 $tvbro = Save-File (Get-LatestGitHubAsset 'truefedex/tv-bro' '*-generic-geckoExcluded.apk' `
         'https://github.com/truefedex/tv-bro/releases/download/v3.0.7/tvbro-3.0.7-generic-geckoExcluded.apk') 'tvbro.apk'
 if (-not $SkipGercekKapat) {
     $gercekKapat = Save-File (Get-LatestGitHubAsset $ThisRepo 'gercek-kapat-*.apk' `
-            "https://github.com/$ThisRepo/releases/download/v1.0/gercek-kapat-1.0.apk") 'gercek-kapat.apk'
+            "https://github.com/$ThisRepo/releases/download/v1.1/gercek-kapat-1.1.apk") 'gercek-kapat.apk'
 }
 
-Write-Step 'Uygulamalar kuruluyor'
+Write-Step 'Installing apps'
 Install-Apk $couchy
 Install-Apk $tvbro
 if (-not $SkipGercekKapat) { Install-Apk $gercekKapat }
 
-Write-Step 'Ana ekran: Couchy'
+Write-Step 'Home screen: Couchy'
 Write-Host "   $(Invoke-AdbShell 'cmd package set-home-activity com.conreo.couchytv/.MainActivity')"
 
-Write-Step 'Paketler kapatılıyor (silinmiyor)'
+Write-Step 'Disabling packages (not uninstalling)'
 $skip = @()
 if ($KeepVoiceSearch) { $skip += 'com.google.android.katniss', 'com.google.android.speech.pumpkin' }
 if ($KeepCast) { $skip += 'com.google.android.apps.mediashell' }
 if ((Invoke-AdbShell 'dumpsys account | grep -m1 Accounts:') -match 'Accounts:\s*[1-9]') {
     $skip += 'com.android.vending'
-    Write-Host '   TV''de Google hesabı var: Play Store açık bırakılıyor.'
+    Write-Host '   The TV has a Google account: leaving Play Store on.'
 }
 $installed = @{}
 foreach ($line in ((Invoke-AdbShell 'pm list packages') -split "`r?`n")) {
@@ -138,46 +138,47 @@ foreach ($line in ((Invoke-AdbShell 'pm list packages') -split "`r?`n")) {
 }
 foreach ($pkg in $BekoPackages.Keys) {
     $note = $BekoPackages[$pkg]
-    if ($skip -contains $pkg) { Write-Host "   atlandı:    $pkg ($note)"; continue }
-    if (-not $installed.ContainsKey($pkg)) { Write-Host "   yok:        $pkg"; continue }
+    if ($skip -contains $pkg) { Write-Host "   kept:        $pkg ($note)"; continue }
+    if (-not $installed.ContainsKey($pkg)) { Write-Host "   not found:   $pkg"; continue }
     $result = Invoke-AdbShell "pm disable-user --user 0 $pkg"
-    if ($result -match 'disabled') { Write-Host "   kapatıldı:  $pkg ($note)" }
-    else { Write-Warning "$pkg kapatılamadı: $result" }
+    if ($result -match 'disabled') { Write-Host "   disabled:    $pkg ($note)" }
+    else { Write-Warning "Could not disable $($pkg): $result" }
 }
 
-Write-Step 'Log seviyesi ve animasyonlar'
+Write-Step 'Log level and animations'
 Invoke-AdbShell 'setprop persist.log.tag W' | Out-Null
 foreach ($key in 'window_animation_scale', 'transition_animation_scale', 'animator_duration_scale') {
     Invoke-AdbShell "settings put global $key 0.5" | Out-Null
 }
-Write-Host "   persist.log.tag = $(Invoke-AdbShell 'getprop persist.log.tag'), animasyonlar 0.5"
+Write-Host "   persist.log.tag = $(Invoke-AdbShell 'getprop persist.log.tag'), animation scales 0.5"
 Invoke-AdbShell 'input keyevent KEYCODE_HOME' | Out-Null
 
 if (-not $SkipGercekKapat) {
-    Write-Step 'Gerçek Kapat eşleştiriliyor'
+    Write-Step 'Pairing Gerçek Kapat'
     Invoke-AdbShell 'am startservice -n io.github.ifkurt.gercekkapat/.WatchService -a io.github.ifkurt.gercekkapat.PAIR' | Out-Null
-    Write-Host "   TV'de izin penceresi çıkacak: 'Her zaman izin ver' kutusunu işaretleyip onayla."
+    Write-Host "   The TV will show a permission prompt: tick 'Always allow' and confirm."
     $paired = $false
     $deadline = (Get-Date).AddSeconds(150)
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 5
-        if ((Invoke-AdbShell 'dumpsys activity service io.github.ifkurt.gercekkapat/.WatchService') -match 'tamam \(ok') {
+        if ((Invoke-AdbShell 'dumpsys activity service io.github.ifkurt.gercekkapat/.WatchService') -match 'pairing done \(ok|tamam \(ok') {
             $paired = $true
             break
         }
     }
-    if ($paired) { Write-Host '   eşleştirme tamam' }
+    if ($paired) { Write-Host '   paired' }
     else {
-        Write-Warning ('Eşleştirme doğrulanamadı. Tekrar dene: adb shell am startservice -n ' +
+        Write-Warning ('Could not confirm pairing. Try again: adb shell am startservice -n ' +
             'io.github.ifkurt.gercekkapat/.WatchService -a io.github.ifkurt.gercekkapat.PAIR')
     }
 }
 
-Write-Step 'Elle yapılacaklar'
-Write-Host '   1. TV''de Couchy''nin kurulum adımlarını bitir (VPN adımında "Atla"), gereksiz kutucukları gizle.'
-Write-Host '   2. Canlı TV açıkken MENU > Gelişmiş Seçenekler > HbbTV Ayarları > HbbTV Desteği: Kapalı.'
-Write-Host '   3. TV Bro''yu bir kez aç: Ad blocking açık, Updates > Auto check for updates kapalı.'
-Write-Host '   4. TV''yi bir kez yeniden başlat: adb reboot'
+Write-Step 'Manual steps'
+Write-Host '   1. On the TV, finish Couchy''s first-run steps ("Skip" at the VPN step) and hide the tiles you do not need.'
+Write-Host '   2. With live TV on: MENU > Advanced Options > HbbTV Settings > HbbTV Support: Off'
+Write-Host '      (Turkish menu: Gelişmiş Seçenekler > HbbTV Ayarları > HbbTV Desteği; English names may differ slightly).'
+Write-Host '   3. Open TV Bro once: Ad blocking on, Updates > Auto check for updates off.'
+Write-Host '   4. Reboot the TV once: adb reboot'
 Write-Host ''
-Write-Host "Yedek dosyası: $backupFile"
-Write-Host "Geri almak için: powershell -ExecutionPolicy Bypass -File .\scripts\restore.ps1 -TvIp $TvIp"
+Write-Host "Backup file: $backupFile"
+Write-Host "To undo: powershell -ExecutionPolicy Bypass -File .\scripts\restore.ps1 -TvIp $TvIp"

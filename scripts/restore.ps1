@@ -1,11 +1,11 @@
 ﻿<#
 .SYNOPSIS
-    apply.ps1'in yaptıklarını geri alır.
+    Undoes what apply.ps1 did.
 
 .DESCRIPTION
-    packages.ps1'deki paketleri geri açar, Google ana ekranını geri getirir, log seviyesini ve
-    animasyonları varsayılana döndürür, Gerçek Kapat'ı kaldırır. -RemoveApps ile Couchy ve TV Bro da kaldırılır.
-    HbbTV'yi istersen TV menüsünden kendin geri aç.
+    Enables the packages in packages.ps1 again, brings back the Google home screen, resets the log level and
+    animation scales, and uninstalls Gerçek Kapat. With -RemoveApps it also uninstalls Couchy and TV Bro.
+    Turn HbbTV back on from the TV menu yourself if you want it.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\scripts\restore.ps1 -TvIp 192.168.1.50
@@ -21,24 +21,24 @@ param(
 
 $Target = "$($TvIp):5555"
 
-Assert-Command 'adb' 'Android SDK Platform-Tools kurulu ve PATH''te olmalı.'
+Assert-Command 'adb' 'Android SDK Platform-Tools must be installed and on PATH.'
 Connect-Tv
 
-Write-Step 'Paketler geri açılıyor'
+Write-Step 'Enabling packages again'
 foreach ($pkg in $BekoPackages.Keys) {
     Write-Host "   $(Invoke-AdbShell "pm enable $pkg")"
 }
 
-Write-Step 'Ana ekran: Google'
+Write-Step 'Home screen: Google'
 Write-Host "   $(Invoke-AdbShell 'cmd package set-home-activity com.google.android.tvlauncher/.MainActivity')"
 
-Write-Step 'Log seviyesi ve animasyonlar varsayılana'
+Write-Step 'Log level and animations back to defaults'
 Invoke-AdbShell "setprop persist.log.tag ''" | Out-Null
 foreach ($key in 'window_animation_scale', 'transition_animation_scale', 'animator_duration_scale') {
     Invoke-AdbShell "settings put global $key 1.0" | Out-Null
 }
 
-Write-Step 'Gerçek Kapat kaldırılıyor'
+Write-Step 'Uninstalling Gerçek Kapat'
 Write-Host "   $((& adb -s $Target uninstall io.github.ifkurt.gercekkapat 2>&1 | Out-String).Trim())"
 if ($RemoveApps) {
     foreach ($pkg in 'com.conreo.couchytv', 'com.phlox.tvwebbrowser') {
@@ -47,7 +47,7 @@ if ($RemoveApps) {
 }
 Invoke-AdbShell 'input keyevent KEYCODE_HOME' | Out-Null
 
-Write-Step 'Notlar'
-Write-Host '   - HbbTV: canlı TV açıkken MENU > Gelişmiş Seçenekler > HbbTV Ayarları.'
-Write-Host '   - Gerçek Kapat''ın ADB izni TV''de kayıtlı kalır. Silmek için Geliştirici seçenekleri >'
-Write-Host '     "USB hata ayıklama yetkilerini kaldır" (bilgisayarın iznini de siler).'
+Write-Step 'Notes'
+Write-Host '   - HbbTV: with live TV on, MENU > Advanced Options > HbbTV Settings.'
+Write-Host '   - Gerçek Kapat''s ADB key stays approved on the TV. To remove it: Developer options >'
+Write-Host '     "Revoke USB debugging authorizations" (this also removes your computer''s permission).'

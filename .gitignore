@@ -7,4 +7,4 @@ gercek-kapat/build/
 *sifre*.txt
 
 # backups written by scripts/apply.ps1
-yedek-*.txt
+backup-*.txt

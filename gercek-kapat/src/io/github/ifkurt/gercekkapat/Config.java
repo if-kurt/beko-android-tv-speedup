@@ -43,10 +43,10 @@ final class Config {
     }
 
     String describe() {
-        return "etkin=" + enabled
-                + ", gece " + nightStart + ":00-" + nightEnd + ":00 ve en az " + nightMinHours + " saat"
-                + ", ya da her saatte en az " + anyMinHours + " saat"
-                + ", bekleme " + graceMs + " ms"
-                + (testOnce ? ", TEST kurulu (bir sonraki kapatma gerçek)" : "");
+        return "enabled=" + enabled
+                + ", night " + nightStart + ":00-" + nightEnd + ":00 after at least " + nightMinHours + " h"
+                + ", or any time after " + anyMinHours + " h"
+                + ", grace " + graceMs + " ms"
+                + (testOnce ? ", TEST armed (the next power-off is real)" : "");
     }
 }

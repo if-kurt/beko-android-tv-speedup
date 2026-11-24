@@ -68,7 +68,7 @@ public final class WatchService extends Service {
         filter.addAction(Intent.ACTION_SCREEN_ON);
         registerReceiver(screenReceiver, filter);
         startForeground(1, buildNotification());
-        log.add("servis başladı, TV " + formatUptime(SystemClock.elapsedRealtime()) + " önce açılmış");
+        log.add("service started " + versionName() + ", TV booted " + formatUptime(SystemClock.elapsedRealtime()) + " ago");
     }
 
     @Override
@@ -80,7 +80,7 @@ public final class WatchService extends Service {
             Config c = Config.load(this);
             c.testOnce = true;
             c.save(this);
-            log.add("TEST kuruldu: güç tuşuna bir sonraki basışta gerçek kapatma yapılacak");
+            log.add("TEST armed: the next power button press will really power off");
         } else if (ACTION_CONFIG.equals(action)) {
             applyConfig(intent);
         }
@@ -109,7 +109,7 @@ public final class WatchService extends Service {
         String reason = Policy.decide(c.enabled, c.testOnce, now, hour,
                 c.nightStart, c.nightEnd, c.nightMinHours, c.anyMinHours);
         if (reason == null) {
-            log.add("ekran kapandı: normal uyku (TV " + formatUptime(now) + " açık, saat " + hour + ")");
+            log.add("screen off: normal sleep (TV up " + formatUptime(now) + ", hour " + hour + ")");
             return;
         }
         if (c.testOnce) {
@@ -119,7 +119,7 @@ public final class WatchService extends Service {
         wakeLock.acquire(60000);
         screenOffAt = now;
         pending = true;
-        log.add("ekran kapandı: gerçek kapatma (" + reason + "), " + c.graceMs + " ms sonra");
+        log.add("screen off: real power-off (" + reason + ") in " + c.graceMs + " ms");
         worker.postDelayed(shutdownTask, c.graceMs);
     }
 
@@ -128,7 +128,7 @@ public final class WatchService extends Service {
             pending = false;
             worker.removeCallbacks(shutdownTask);
             releaseWakeLock();
-            log.add("ekran tekrar açıldı: kapatma iptal");
+            log.add("screen back on: power-off cancelled");
         }
     }
 
@@ -142,34 +142,34 @@ public final class WatchService extends Service {
                 pending = false;
                 PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
                 if (pm.isInteractive()) {
-                    log.add("iptal: ekran açık");
+                    log.add("cancelled: the screen is on");
                     return;
                 }
                 long late = SystemClock.elapsedRealtime() - screenOffAt;
                 if (late > MAX_LATE_MS) {
-                    log.add("iptal: " + late + " ms gecikti, TV arada uyumuş olmalı");
+                    log.add("cancelled: " + late + " ms late, the TV must have slept in between");
                     return;
                 }
                 AudioManager audio = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
                 if (audio != null && audio.isMusicActive()) {
-                    log.add("iptal: ses çalıyor (ekran kapalı dinleniyor olabilir)");
+                    log.add("cancelled: audio is playing (maybe someone is listening with the screen off)");
                     return;
                 }
                 KeyPair keys = Keys.loadOrCreate(getFilesDir());
                 AdbClient adb = AdbClient.connect(HOST, PORT, keys, KEY_NAME, false, 5000, 5000);
                 try {
-                    log.add("reboot -p gönderiliyor");
+                    log.add("sending reboot -p");
                     adb.shell("reboot -p", 15000);
-                    log.add("reboot -p bitti");
+                    log.add("reboot -p finished");
                 } catch (IOException e) {
-                    log.add("bağlantı koptu, TV kapanıyor olmalı (" + e.getMessage() + ")");
+                    log.add("connection dropped, the TV should be powering off (" + e.getMessage() + ")");
                 } finally {
                     adb.close();
                 }
             } catch (AdbClient.NotAuthorizedException e) {
-                log.add("ADB izni yok, PAIR gerekli: " + e.getMessage());
+                log.add("no ADB permission, run PAIR: " + e.getMessage());
             } catch (Exception e) {
-                log.add("hata, TV normal uykuya geçecek: " + e);
+                log.add("error, the TV will sleep normally: " + e);
             } finally {
                 releaseWakeLock();
             }
@@ -183,18 +183,18 @@ public final class WatchService extends Service {
         public void run() {
             try {
                 KeyPair keys = Keys.loadOrCreate(getFilesDir());
-                log.add("eşleştirme başladı, anahtar parmak izi "
+                log.add("pairing started, key fingerprint "
                         + AdbClient.fingerprint((RSAPublicKey) keys.getPublic())
-                        + "; TV'de izin penceresi çıkarsa onayla");
+                        + "; approve the prompt on the TV if it appears");
                 AdbClient adb = AdbClient.connect(HOST, PORT, keys, KEY_NAME, true, 5000, 120000);
                 try {
                     String answer = adb.shell("echo ok", 5000).trim();
-                    log.add("eşleştirme tamam (" + answer + ", " + adb.deviceBanner + ")");
+                    log.add("pairing done (" + answer + ", " + adb.deviceBanner + ")");
                 } finally {
                     adb.close();
                 }
             } catch (Exception e) {
-                log.add("eşleştirme başarısız: " + e);
+                log.add("pairing failed: " + e);
             }
         }
     };
@@ -210,7 +210,7 @@ public final class WatchService extends Service {
         c.anyMinHours = rangeExtra(intent, "anyMinHours", c.anyMinHours, 1, 24 * 60);
         c.graceMs = rangeExtra(intent, "graceMs", c.graceMs, 0, 15000);
         c.save(this);
-        log.add("ayarlar: " + c.describe());
+        log.add("settings: " + c.describe());
     }
 
     private static int hourExtra(Intent intent, String key, int current) {
@@ -234,24 +234,32 @@ public final class WatchService extends Service {
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         String reason = Policy.decide(c.enabled, false, now, hour,
                 c.nightStart, c.nightEnd, c.nightMinHours, c.anyMinHours);
-        pw.println("Gerçek Kapat 1.0");
-        pw.println("TV açılalı: " + formatUptime(now));
-        pw.println("ayarlar: " + c.describe());
-        pw.println("şimdi kapatılsa: " + (reason == null ? "normal uyku" : "gerçek kapatma (" + reason + ")"));
+        pw.println("Gerçek Kapat " + versionName());
+        pw.println("TV up: " + formatUptime(now));
+        pw.println("settings: " + c.describe());
+        pw.println("if turned off now: " + (reason == null ? "normal sleep" : "real power-off (" + reason + ")"));
         try {
-            pw.println("anahtar: " + (Keys.exist(getFilesDir())
+            pw.println("key: " + (Keys.exist(getFilesDir())
                     ? AdbClient.fingerprint((RSAPublicKey) Keys.loadOrCreate(getFilesDir()).getPublic())
-                    : "henüz yok (PAIR çalıştır)"));
+                    : "none yet (run PAIR)"));
         } catch (Exception e) {
-            pw.println("anahtar okunamadı: " + e);
+            pw.println("could not read the key: " + e);
         }
-        pw.println("son olaylar:");
+        pw.println("recent events:");
         for (String line : log.lines()) {
             pw.println("  " + line);
         }
     }
 
     // ---- helpers ----
+
+    private String versionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
 
     private void releaseWakeLock() {
         if (wakeLock != null && wakeLock.isHeld()) {
@@ -263,7 +271,7 @@ public final class WatchService extends Service {
         return new Notification.Builder(this)
                 .setSmallIcon(android.R.drawable.ic_lock_power_off)
                 .setContentTitle("Gerçek Kapat")
-                .setContentText("Güç tuşunu izliyor")
+                .setContentText("Watching the power button")
                 .setPriority(Notification.PRIORITY_MIN)
                 .setOngoing(true)
                 .build();
@@ -274,6 +282,6 @@ public final class WatchService extends Service {
         long days = minutes / (24 * 60);
         long hours = (minutes / 60) % 24;
         long mins = minutes % 60;
-        return days > 0 ? days + " gün " + hours + " saat" : hours + " saat " + mins + " dk";
+        return days > 0 ? days + " d " + hours + " h" : hours + " h " + mins + " min";
     }
 }

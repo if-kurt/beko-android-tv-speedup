@@ -1,107 +1,112 @@
 # Gerçek Kapat
 
-Beko (Skyworth, MStar/MediaTek, Android TV 9) için küçük bir yardımcı uygulama. Güç tuşuna tek basınca TV normalde
-RAM'de uyuyor (STR) ve haftalarca yeniden başlamadan ağırlaşıyor. Bu uygulama, tuşa basıldığı anda koşullar
-uygunsa TV'yi uyutmak yerine gerçekten kapatıyor (`reboot -p`). Evdekilerin alışkanlığı değişmiyor.
+**English** | [Türkçe](README.tr.md)
 
-Simgesi yok, ana ekranda görünmüyor. Sadece ADB ile yönetiliyor. APK ~20 KB, root gerekmiyor.
+A small helper app for a Beko Android TV (Skyworth, MStar/MediaTek, Android TV 9). A single press of the power button
+normally suspends the TV to RAM (STR), so it can go weeks without a reboot and grow sluggish. When conditions are met,
+this app powers the TV off for real (`reboot -p`) at the moment the button is pressed. Nobody at home has to change
+how they turn the TV off.
 
-## Nasıl karar veriyor
+No icon and nothing on the home screen. It is managed over ADB only. The APK is ~20 KB and needs no root.
 
-Ekran kapanınca (güç tuşu, otomatik kapanma vb.):
+## How it decides
 
-- Saat **23:00–06:00** arasındaysa ve TV en az **72 saattir** gerçekten kapanmadıysa → gerçek kapatma.
-- TV **120 saatten** (5 gün) uzun süredir hiç kapanmadıysa → saatten bağımsız gerçek kapatma.
-- Diğer durumlarda → normal uyku (anında açılış).
+When the screen turns off (power button, auto power-off, …):
 
-Gerçek kapatmadan önce 3 saniye bekliyor ve şu durumlarda vazgeçiyor: ekran tekrar açıldıysa, arada TV uyuduysa
-(20 saniyeden fazla gecikme), ses çalıyorsa ya da ADB izni yoksa. En kötü sonuç TV'nin normal uykuya geçmesi.
+- Between **23:00 and 06:00**, if the TV hasn't really been off for at least **72 hours** → real power-off.
+- If the TV hasn't been off for more than **120 hours** (5 days) → real power-off at any hour.
+- Otherwise → normal sleep (instant wake-up).
 
-## Nasıl çalışıyor
+Before a real power-off it waits 3 seconds and gives up if the screen comes back on, if the TV slept in between (more
+than 20 seconds late), if audio is playing, or if it has no ADB permission. The worst case is that the TV just sleeps
+as usual.
 
-- `WatchService` ön plan servisi olarak çalışıyor, açılışta `BOOT_COMPLETED` ile kendiliğinden başlıyor.
-- Ekran kapanınca `Policy` karar veriyor. Kapatılacaksa bir wake lock tutup TV'nin uykuya geçmesini birkaç saniye
-  erteliyor.
-- `AdbClient`, ADB'nin TCP protokolünü (CNXN/AUTH/OPEN) konuşan küçük bir istemci. TV'nin kendi adbd'sine
-  `127.0.0.1:5555` üzerinden bağlanıp `shell:reboot -p` çalıştırıyor. Bu firmware'de `svc power shutdown` yutuluyor,
-  `reboot -p` çalışıyor.
-- Uygulamanın 2048 bitlik RSA anahtarı ilk eşleştirmede üretiliyor ve özel klasöründe duruyor. TV ilk seferde
-  "USB hata ayıklamaya izin verilsin mi?" diye soruyor.
-- Servis yalnızca `android.permission.DUMP` sahiplerine (ADB kabuğu, sistem) açık; başka uygulamalar onu tetikleyemiyor.
-- Olaylar küçük bir dosyaya yazılıyor; `dumpsys` ile okunuyor, kapanmadan önceki kayıtlar da korunuyor.
+## How it works
 
-## Kurulum
+- `WatchService` runs as a foreground service and starts by itself at boot through `BOOT_COMPLETED`.
+- When the screen turns off, `Policy` decides. If the TV should power off, the service holds a wake lock so the TV
+  doesn't suspend for those few seconds.
+- `AdbClient` is a small client for ADB's TCP protocol (CNXN/AUTH/OPEN). It connects to the TV's own adbd at
+  `127.0.0.1:5555` and runs `shell:reboot -p`. On this firmware `svc power shutdown` is swallowed, while `reboot -p`
+  works.
+- The app's 2048-bit RSA key is created at first pairing and kept in its private folder. The first time, the TV asks
+  "Allow USB debugging?".
+- The service is only open to holders of `android.permission.DUMP` (the ADB shell and the system), so other apps can't
+  trigger it.
+- Events go to a small file that `dumpsys` reads, so the lines written right before a power-off are kept too.
 
-APK'yı [Releases](https://github.com/if-kurt/beko-android-tv-speedup/releases) sayfasından indir:
+## Install
+
+Download the APK from [Releases](https://github.com/if-kurt/beko-android-tv-speedup/releases):
 
 ```
-adb install gercek-kapat-1.0.apk
+adb install gercek-kapat-1.1.apk
 adb shell am startservice -n io.github.ifkurt.gercekkapat/.WatchService -a io.github.ifkurt.gercekkapat.PAIR
 ```
 
-TV'de "USB hata ayıklamaya izin verilsin mi?" penceresi çıkıyor. "Her zaman izin ver" kutusunu işaretleyip onayla.
-Penceredeki parmak izi, durum çıktısındaki "anahtar" satırıyla aynı olmalı.
+The TV shows "Allow USB debugging?". Tick "Always allow" and confirm. The fingerprint in the prompt should match the
+"key" line of the status output.
 
-## Durum ve kayıtlar
+## Status and events
 
 ```
 adb shell dumpsys activity service io.github.ifkurt.gercekkapat/.WatchService
 ```
 
-Örnek, test sırasında:
+Example: the events from the test on the real TV, in 1.1's format:
 
 ```
-2026-11-24 19:00:36  TEST kuruldu: güç tuşuna bir sonraki basışta gerçek kapatma yapılacak
-2026-11-24 19:01:12  ekran kapandı: gerçek kapatma (test), 3000 ms sonra
-2026-11-24 19:01:15  reboot -p gönderiliyor
-2026-11-24 19:01:15  reboot -p bitti
-2026-11-24 19:02:46  servis başladı, TV 0 saat 1 dk önce açılmış
+2026-11-24 19:00:36  TEST armed: the next power button press will really power off
+2026-11-24 19:01:12  screen off: real power-off (test) in 3000 ms
+2026-11-24 19:01:15  sending reboot -p
+2026-11-24 19:01:15  reboot -p finished
+2026-11-24 19:02:46  service started 1.1, TV booted 0 h 1 min ago
 ```
 
 ## Test
 
-Bir sonraki güç tuşu basışında koşullara bakmadan gerçek kapatma yapar (tek seferlik):
+Makes the next power button press a real power-off, whatever the conditions (one time only):
 
 ```
 adb shell am startservice -n io.github.ifkurt.gercekkapat/.WatchService -a io.github.ifkurt.gercekkapat.TEST
 ```
 
-## Ayarlar
+## Settings
 
 ```
 adb shell am startservice -n io.github.ifkurt.gercekkapat/.WatchService -a io.github.ifkurt.gercekkapat.CONFIG --ei nightStart 23 --ei nightEnd 6 --ei nightMinHours 72 --ei anyMinHours 120 --ei graceMs 3000
 ```
 
-Kapatmak için `--ez enabled false`, açmak için `--ez enabled true`. Sadece verdiğin değerler değişiyor.
+`--ez enabled false` turns it off, `--ez enabled true` turns it back on. Only the values you pass change.
 
-## Kaldırma
+## Uninstall
 
 ```
 adb uninstall io.github.ifkurt.gercekkapat
 ```
 
-Uygulamanın ADB anahtarı TV'de onaylı kalıyor. Onu da silmek için Geliştirici seçenekleri → "USB hata ayıklama
-yetkilerini kaldır" (bilgisayarın iznini de siler; bilgisayar bir sonraki bağlantıda tekrar onay ister).
+The app's ADB key stays approved on the TV. To remove it as well: Developer options → "Revoke USB debugging
+authorizations" (this also removes your computer's permission; it will ask again on the next connection).
 
-## Derleme
+## Build
 
-Gradle gerekmiyor. Ubuntu/Debian'da (WSL de olur):
+No Gradle needed. On Ubuntu/Debian (WSL works too):
 
 ```
 sudo apt install android-sdk-platform-23 aapt dalvik-exchange zipalign apksigner default-jdk
 keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias gercekkapat -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Gercek Kapat"
-KS_PASS='keystore-sifren' sh build.sh
+KS_PASS='your-keystore-password' sh build.sh
 ```
 
-Çıktı: `build/gercek-kapat-<sürüm>.apk`. Kendi anahtarınla imzaladığın APK, Releases'teki APK'nın üzerine
-güncelleme olarak kurulamaz; önce onu kaldır.
+Output: `build/gercek-kapat-<version>.apk`. An APK signed with your own key can't be installed as an update over the
+APK from Releases; uninstall that one first.
 
-## Testler
+## Tests
 
-`test/` klasöründeki `mock_adbd.py`, gerçek adbd gibi davranan katı bir sahte sunucu. Çerçeve yapısını, sağlama
-toplamını, imzayı ve anahtar biçimini denetliyor. `AdbClientTest.java` istemciyi ona karşı çalıştırıyor, karar
-kurallarını da sınıyor. Anahtar biçimi ve imzalar, gerçek cihazlara bağlanan
-[adb-shell](https://github.com/JeffLIrion/adb_shell) kütüphanesinin ürettiğiyle bayt bayt aynı.
+`test/mock_adbd.py` is a strict fake adbd. It checks the message framing, checksums, signatures and the key format.
+`AdbClientTest.java` runs the client against it and also checks the decision rules. The key format and signatures are
+byte-for-byte identical to those of [adb-shell](https://github.com/JeffLIrion/adb_shell), a library used with real
+devices.
 
 ```
 mkdir -p /tmp/gk && javac -d /tmp/gk src/io/github/ifkurt/gercekkapat/{Base64,AdbClient,Keys,Policy}.java test/AdbClientTest.java
